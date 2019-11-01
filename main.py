@@ -28,16 +28,15 @@ from kivy.core.window import Window
 from pidev.kivy import DPEAButton
 from pidev.kivy import PauseScreen
 from time import sleep
-import RPi.GPIO as GPIO 
+import RPi.GPIO as GPIO
 from pidev.stepper import stepper
 from pidev.Cyprus_Commands import Cyprus_Commands_RPi as cyprus
-
 
 # ////////////////////////////////////////////////////////////////
 # //                      GLOBAL VARIABLES                      //
 # //                         CONSTANTS                          //
 # ////////////////////////////////////////////////////////////////
-ON = False
+ON = True
 OFF = True
 HOME = True
 TOP = False
@@ -59,8 +58,9 @@ class MyApp(App):
         self.title = "Perpetual Motion"
         return sm
 
+
 Builder.load_file('main.kv')
-Window.clearcolor = (.1, .1,.1, 1) # (WHITE)
+Window.clearcolor = (.1, .1, .1, 1)  # (WHITE)
 
 cyprus.open_spi()
 
@@ -68,13 +68,58 @@ cyprus.open_spi()
 # //                    SLUSH/HARDWARE SETUP                    //
 # ////////////////////////////////////////////////////////////////
 sm = ScreenManager()
-ramp = stepper(port = 0, speed = INIT_RAMP_SPEED)
+ramp = stepper(port=0, speed=INIT_RAMP_SPEED)
 
 # ////////////////////////////////////////////////////////////////
 # //                       MAIN FUNCTIONS                       //
 # //             SHOULD INTERACT DIRECTLY WITH HARDWARE         //
 # ////////////////////////////////////////////////////////////////
-	
+
+
+def debounce():
+    pass
+
+
+def toggle_gate():
+    global CLOSE
+    if CLOSE:
+        cyprus.set_servo_position(2, 0)
+    else:
+        cyprus.set_servo_position(2, 0.5)
+    CLOSE = not CLOSE
+
+
+def toggle_staircase(speed):
+    global ON
+    if ON:
+        cyprus.set_pwm_values(1, period_value=100000, compare_value=0, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
+    else:
+        cyprus.set_pwm_values(1, period_value=100000, compare_value=speed * 1000, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
+    ON = not ON
+
+
+def move_ramp():
+    pass
+
+
+def set_ramp_speed(speed):
+    pass
+
+
+def set_staircase_speed(speed):
+    print(speed)
+    if ON:
+        cyprus.set_pwm_values(1, period_value=100000, compare_value=0, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
+        cyprus.set_pwm_values(1, period_value=100000, compare_value=speed * 1000, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
+
+
+def is_ball_at_bottom():
+    return (cyprus.read_gpio() & 0b0010) == 0
+
+
+def is_ball_at_top():
+    return (cyprus.read_gpio() & 0b0001) == 0
+
 # ////////////////////////////////////////////////////////////////
 # //        DEFINE MAINSCREEN CLASS THAT KIVY RECOGNIZES        //
 # //                                                            //
@@ -84,9 +129,10 @@ ramp = stepper(port = 0, speed = INIT_RAMP_SPEED)
 # //   SHOULD REFERENCE MAIN FUNCTIONS WITHIN THESE FUNCTIONS   //
 # //      SHOULD NOT INTERACT DIRECTLY WITH THE HARDWARE        //
 # ////////////////////////////////////////////////////////////////
+
+
 class MainScreen(Screen):
     version = cyprus.read_firmware_version()
-    staircaseSpeedText = '0'
     rampSpeed = INIT_RAMP_SPEED
     staircaseSpeed = 40
 
@@ -95,24 +141,30 @@ class MainScreen(Screen):
         self.initialize()
 
     def toggleGate(self):
-        print("Open and Close gate here")
+        toggle_gate()
 
     def toggleStaircase(self):
-        print("Turn on and off staircase here")
-        
+        toggle_staircase(self.staircaseSpeed)
+
     def toggleRamp(self):
         print("Move ramp up and down here")
-        
+
     def auto(self):
-        print("Run through one cycle of the perpetual motion machine")
-        
+        print("Run through one cycle of gatethe perpetual motion machine")
+
     def setRampSpeed(self, speed):
-        print("Set the ramp speed and update slider text")
-        
+        self.rampSpeed = speed
+        set_ramp_speed(self.rampSpeed)
+        self.ids.rampSpeedLabel.text = 'Ramp Speed: ' + str(self.rampSpeed)
+
     def setStaircaseSpeed(self, speed):
-        print("Set the staircase speed and update slider text")
-        
+        self.staircaseSpeed = speed
+        set_staircase_speed(self.staircaseSpeed)
+        self.ids.staircaseSpeedLabel.text = 'Staircase Speed: ' + str(self.staircaseSpeed)
+
     def initialize(self):
+        toggle_gate()
+        toggle_staircase(self.staircaseSpeed)
         print("Close gate, stop staircase and home ramp here")
 
     def resetColors(self):
@@ -120,12 +172,13 @@ class MainScreen(Screen):
         self.ids.staircase.color = YELLOW
         self.ids.ramp.color = YELLOW
         self.ids.auto.color = BLUE
-    
+
     def quit(self):
         print("Exit")
         MyApp().stop()
 
-sm.add_widget(MainScreen(name = 'main'))
+
+sm.add_widget(MainScreen(name='main'))
 
 # ////////////////////////////////////////////////////////////////
 # //                          RUN APP                           //
