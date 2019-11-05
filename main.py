@@ -37,16 +37,14 @@ from pidev.Cyprus_Commands import Cyprus_Commands_RPi as cyprus
 # //                         CONSTANTS                          //
 # ////////////////////////////////////////////////////////////////
 ON = True
-OFF = True
-HOME = True
-TOP = False
-OPEN = False
-CLOSE = True
+TOP = True
+OPEN = True
 YELLOW = .180, 0.188, 0.980, 1
 BLUE = 0.917, 0.796, 0.380, 1
 DEBOUNCE = 0.1
-INIT_RAMP_SPEED = 150
-RAMP_LENGTH = 725
+INIT_RAMP_SPEED = 25
+RAMP_LENGTH = 225
+INIT_SC_SPEED = 40
 
 
 # ////////////////////////////////////////////////////////////////
@@ -68,7 +66,8 @@ cyprus.open_spi()
 # //                    SLUSH/HARDWARE SETUP                    //
 # ////////////////////////////////////////////////////////////////
 sm = ScreenManager()
-ramp = stepper(port=0, speed=INIT_RAMP_SPEED)
+ramp = stepper(port=0, micro_steps=32, hold_current=20, run_current=20, accel_current=20, deaccel_current=20,
+               steps_per_unit=25, speed=INIT_RAMP_SPEED)
 
 # ////////////////////////////////////////////////////////////////
 # //                       MAIN FUNCTIONS                       //
@@ -76,17 +75,27 @@ ramp = stepper(port=0, speed=INIT_RAMP_SPEED)
 # ////////////////////////////////////////////////////////////////
 
 
-def debounce():
-    pass
+def debounce(is_top):
+    if is_top:
+        if is_ball_at_top():
+            sleep(DEBOUNCE)
+            if is_ball_at_top():
+                return True
+    else:
+        if is_ball_at_bottom():
+            sleep(DEBOUNCE)
+            if is_ball_at_bottom():
+                return True
+    return False
 
 
 def toggle_gate():
-    global CLOSE
-    if CLOSE:
-        cyprus.set_servo_position(2, 0)
+    global OPEN
+    if OPEN:
+        cyprus.set_servo_position(2, 0.05)
     else:
         cyprus.set_servo_position(2, 0.5)
-    CLOSE = not CLOSE
+    OPEN = not OPEN
 
 
 def toggle_staircase(speed):
@@ -94,23 +103,28 @@ def toggle_staircase(speed):
     if ON:
         cyprus.set_pwm_values(1, period_value=100000, compare_value=0, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
     else:
-        cyprus.set_pwm_values(1, period_value=100000, compare_value=speed * 1000, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
+        cyprus.set_pwm_values(1, period_value=100000, compare_value=speed*1000, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
     ON = not ON
 
 
 def move_ramp():
-    pass
+    global TOP
+    if TOP:
+        ramp.home(0)
+    else:
+        ramp.start_go_to_position(RAMP_LENGTH)
+    TOP = not TOP
 
 
 def set_ramp_speed(speed):
-    pass
+    ramp.set_speed(speed)
 
 
 def set_staircase_speed(speed):
-    print(speed)
     if ON:
+        cyprus.set_pwm_values(1, period_value=100000, compare_value=speed*1000, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
+    else:
         cyprus.set_pwm_values(1, period_value=100000, compare_value=0, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
-        cyprus.set_pwm_values(1, period_value=100000, compare_value=speed * 1000, compare_mode=cyprus.LESS_THAN_OR_EQUAL)
 
 
 def is_ball_at_bottom():
@@ -134,7 +148,7 @@ def is_ball_at_top():
 class MainScreen(Screen):
     version = cyprus.read_firmware_version()
     rampSpeed = INIT_RAMP_SPEED
-    staircaseSpeed = 40
+    staircaseSpeed = INIT_SC_SPEED
 
     def __init__(self, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
@@ -142,15 +156,54 @@ class MainScreen(Screen):
 
     def toggleGate(self):
         toggle_gate()
+        if OPEN:
+            self.ids.gate.text = "Close Gate"
+        else:
+            self.ids.gate.text = "Open Gate"
 
     def toggleStaircase(self):
         toggle_staircase(self.staircaseSpeed)
+        if ON:
+            self.ids.staircase.text = "Staircase Off"
+        else:
+            self.ids.staircase.text = "Staircase On"
 
     def toggleRamp(self):
-        print("Move ramp up and down here")
+        move_ramp()
+        if TOP:
+            self.ids.ramp.text = "Ramp to Home"
+        else:
+            self.ids.ramp.text = "Ramp to Top"
 
     def auto(self):
-        print("Run through one cycle of gatethe perpetual motion machine")
+        global ON
+        global OPEN
+        global TOP
+        ON = True
+        OPEN = True
+        TOP = True
+        sc_temp = self.staircaseSpeed
+        ramp_temp = self.rampSpeed
+        self.staircaseSpeed = INIT_SC_SPEED
+        self.rampSpeed = INIT_RAMP_SPEED
+        set_staircase_speed(self.staircaseSpeed)
+        set_ramp_speed(self.rampSpeed)
+        self.initialize()
+        while not debounce(False):
+            print("Please place ball at home.")
+            sleep(1)
+        move_ramp()
+        while ramp.is_busy():
+            sleep(0.1)
+        toggle_staircase(self.staircaseSpeed)
+        move_ramp()
+        toggle_staircase(self.staircaseSpeed)
+        toggle_gate()
+
+        self.staircaseSpeed = sc_temp
+        self.rampSpeed = ramp_temp
+        set_staircase_speed(self.staircaseSpeed)
+        set_ramp_speed(self.rampSpeed)
 
     def setRampSpeed(self, speed):
         self.rampSpeed = speed
@@ -163,9 +216,9 @@ class MainScreen(Screen):
         self.ids.staircaseSpeedLabel.text = 'Staircase Speed: ' + str(self.staircaseSpeed)
 
     def initialize(self):
+        move_ramp()
         toggle_gate()
         toggle_staircase(self.staircaseSpeed)
-        print("Close gate, stop staircase and home ramp here")
 
     def resetColors(self):
         self.ids.gate.color = YELLOW
@@ -175,6 +228,10 @@ class MainScreen(Screen):
 
     def quit(self):
         print("Exit")
+        ramp.free_all()
+        GPIO.cleanup()
+        GPIO.cleanup()
+        cyprus.close()
         MyApp().stop()
 
 
